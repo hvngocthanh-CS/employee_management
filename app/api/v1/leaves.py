@@ -72,7 +72,7 @@ def list_leaves(
         approver_name = None
         if leave.approved_by:
             from app.crud import user as crud_user
-            approver = crud_user.user.get(db, id=leave.approved_by)
+            approver = crud_user.get(db, id=leave.approved_by)
             if approver and approver.employee:
                 approver_name = approver.employee.full_name
         
@@ -154,7 +154,7 @@ def get_leave(
     approver_name = None
     if leave.approved_by:
         from app.crud import user as crud_user
-        approver = crud_user.user.get(db, id=leave.approved_by)
+        approver = crud_user.get(db, id=leave.approved_by)
         if approver and approver.employee:
             approver_name = approver.employee.full_name
     

@@ -29,7 +29,7 @@ def list_positions(
     List all positions với employee statistics
     """
     if level:
-        positions_data = crud_position.position.get_by_level(
+        positions_data = crud_position.get_by_level(
             db, level=level, skip=skip, limit=limit
         )
         # Convert to stats format
@@ -44,7 +44,7 @@ def list_positions(
             )
         return result
     else:
-        positions_with_stats = crud_position.position.get_with_employee_stats(db)
+        positions_with_stats = crud_position.get_with_employee_stats(db)
         
         result = []
         for item in positions_with_stats:
@@ -55,7 +55,7 @@ def list_positions(
                 "level": item["position"].level,
                 "description": item["position"].description,
                 "employee_count": item["employee_count"],
-                "active_employee_count": item["active_employee_count"]
+                "active_employee_count": item["employee_count"]  # Use employee_count since no active status exists
             }
             result.append(PositionWithStats(**pos_dict))
         
@@ -70,7 +70,7 @@ def get_position(
     current_user: User = Depends(get_current_user)
 ):
     """Get position by ID"""
-    position = crud_position.position.get(db, id=position_id)
+    position = crud_position.get(db, id=position_id)
     if not position:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -91,14 +91,14 @@ def create_position(
     Yêu cầu role ADMIN
     """
     # Check if code exists
-    existing = crud_position.position.get_by_code(db, code=position_in.code)
+    existing = crud_position.get_by_code(db, code=position_in.code)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Position code already exists"
         )
     
-    position = crud_position.position.create(db, obj_in=position_in)
+    position = crud_position.create(db, obj_in=position_in)
     return position
 
 
@@ -114,7 +114,7 @@ def update_position(
     Update position
     Yêu cầu role ADMIN
     """
-    position = crud_position.position.get(db, id=position_id)
+    position = crud_position.get(db, id=position_id)
     if not position:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -123,14 +123,14 @@ def update_position(
     
     # Check code uniqueness if updating
     if position_in.code and position_in.code != position.code:
-        existing = crud_position.position.get_by_code(db, code=position_in.code)
+        existing = crud_position.get_by_code(db, code=position_in.code)
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Position code already exists"
             )
     
-    position = crud_position.position.update(db, db_obj=position, obj_in=position_in)
+    position = crud_position.update(db, db_obj=position, obj_in=position_in)
     return position
 
 
@@ -145,7 +145,7 @@ def delete_position(
     Delete position
     Yêu cầu role ADMIN
     """
-    position = crud_position.position.get(db, id=position_id)
+    position = crud_position.get(db, id=position_id)
     if not position:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -164,5 +164,5 @@ def delete_position(
             detail=f"Cannot delete position with {employee_count} employees"
         )
     
-    crud_position.position.delete(db, id=position_id)
+    crud_position.delete(db, id=position_id)
     return None

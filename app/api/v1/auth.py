@@ -93,7 +93,7 @@ def get_current_user_profile(
 @router.post("/register")
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
     """
-    Register new user
+    Register new user with role selection
     """
     # Kiểm tra username đã tồn tại?
     existing_user = db.query(User).filter(User.username == user_in.username).first()
@@ -103,11 +103,12 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
             detail="Username already exists"
         )
     
-    # Tạo user mới với password hashed
+    # Tạo user mới với password hashed và role
     hashed_password = get_password_hash(user_in.password)
     new_user = User(
         username=user_in.username,
         hashed_password=hashed_password,
+        role=user_in.role,  # Set role từ input
         is_active=True
     )
     db.add(new_user)
@@ -117,6 +118,7 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
     return {
         "message": "User registered successfully",
         "username": new_user.username,
+        "role": new_user.role.value,  # Return role để frontend biết
         "id": new_user.id
     }
 

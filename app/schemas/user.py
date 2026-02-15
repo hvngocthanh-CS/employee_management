@@ -12,9 +12,10 @@ class UserBase(BaseModel):
 
 
 class UserCreate(BaseModel):
-    """Schema cho tạo User mới - đơn giản cho WPF"""
+    """Schema cho tạo User mới - với role selection"""
     username: str = Field(..., min_length=3, max_length=50, description="Username duy nhất")
     password: str = Field(..., min_length=6, description="Password (tối thiểu 6 ký tự)")
+    role: UserRole = Field(default=UserRole.EMPLOYEE, description="User role")
     
     @field_validator('password')
     @classmethod

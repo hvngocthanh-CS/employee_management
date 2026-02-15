@@ -31,7 +31,7 @@ def list_users(
     List all users
     Yêu cầu role ADMIN
     """
-    users = crud_user.user.get_multi_with_employee(
+    users = crud_user.get_multi_with_employee(
         db,
         skip=skip,
         limit=limit,
@@ -46,7 +46,7 @@ def list_users(
     if is_active is not None:
         filters['is_active'] = is_active
     
-    total = crud_user.user.count(db, filters=filters)
+    total = crud_user.count(db, filters=filters)
     
     # Convert to response
     user_responses = []
@@ -80,7 +80,7 @@ def get_current_user_info(
     current_user: User = Depends(get_current_user)
 ):
     """Get thông tin user hiện tại"""
-    user = crud_user.user.get_with_employee(db, id=current_user.id)
+    user = crud_user.get_with_employee(db, id=current_user.id)
     
     result = {
         "id": user.id,
@@ -116,7 +116,7 @@ def get_user(
     Get user by ID
     Yêu cầu role ADMIN
     """
-    user = crud_user.user.get_with_employee(db, id=user_id)
+    user = crud_user.get_with_employee(db, id=user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -143,7 +143,7 @@ def create_user(
     Yêu cầu role ADMIN
     """
     try:
-        user = crud_user.user.create(db, obj_in=user_in)
+        user = crud_user.create(db, obj_in=user_in)
         
         return UserResponse(
             **user.__dict__,
@@ -170,7 +170,7 @@ def update_user(
     Update user
     Yêu cầu role ADMIN
     """
-    user = crud_user.user.get(db, id=user_id)
+    user = crud_user.get(db, id=user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -185,7 +185,7 @@ def update_user(
         )
     
     try:
-        user = crud_user.user.update(db, db_obj=user, obj_in=user_in)
+        user = crud_user.update(db, db_obj=user, obj_in=user_in)
         
         return UserResponse(
             **user.__dict__,
@@ -209,7 +209,7 @@ def change_password(
 ):
     """Đổi password của chính mình"""
     try:
-        crud_user.user.change_password(
+        crud_user.change_password(
             db,
             user=current_user,
             old_password=password_data.old_password,
@@ -235,14 +235,14 @@ def reset_password(
     Reset password của user khác (admin function)
     Yêu cầu role ADMIN
     """
-    user = crud_user.user.get(db, id=user_id)
+    user = crud_user.get(db, id=user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
-    crud_user.user.reset_password(db, user=user, new_password=new_password)
+    crud_user.reset_password(db, user=user, new_password=new_password)
     return {"message": f"Password reset successfully for user {user.username}"}
 
 
@@ -257,14 +257,14 @@ def activate_user(
     Activate user account
     Yêu cầu role ADMIN
     """
-    user = crud_user.user.get(db, id=user_id)
+    user = crud_user.get(db, id=user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
-    user = crud_user.user.activate(db, user=user)
+    user = crud_user.activate(db, user=user)
     
     return UserResponse(
         **user.__dict__,
@@ -292,14 +292,14 @@ def deactivate_user(
             detail="Cannot deactivate your own account"
         )
     
-    user = crud_user.user.get(db, id=user_id)
+    user = crud_user.get(db, id=user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
-    user = crud_user.user.deactivate(db, user=user)
+    user = crud_user.deactivate(db, user=user)
     
     return UserResponse(
         **user.__dict__,
@@ -322,7 +322,7 @@ def get_users_by_role(
     Get users by role
     Yêu cầu role ADMIN
     """
-    users = crud_user.user.get_users_by_role(
+    users = crud_user.get_users_by_role(
         db, role=role, skip=skip, limit=limit
     )
     
@@ -362,11 +362,11 @@ def get_user_statistics(
     """
     stats = {}
     for role in UserRole:
-        count = crud_user.user.count_by_role(db, role=role)
+        count = crud_user.count_by_role(db, role=role)
         stats[role.value] = count
     
-    total_active = crud_user.user.count(db, filters={"is_active": True})
-    total_inactive = crud_user.user.count(db, filters={"is_active": False})
+    total_active = crud_user.count(db, filters={"is_active": True})
+    total_inactive = crud_user.count(db, filters={"is_active": False})
     
     return {
         "by_role": stats,
@@ -394,12 +394,12 @@ def delete_user(
             detail="Cannot delete your own account"
         )
     
-    user = crud_user.user.get(db, id=user_id)
+    user = crud_user.get(db, id=user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
-    crud_user.user.delete(db, id=user_id)
+    crud_user.delete(db, id=user_id)
     return None

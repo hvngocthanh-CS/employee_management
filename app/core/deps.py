@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.core.security import decode_access_token
-from app.crud import user as crud_user
+from app.crud.user import user as crud_user
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -29,7 +29,7 @@ def get_current_user(
     if username is None:
         raise credentials_exception
     
-    user = crud_user.user.get_by_username(db, username=username)
+    user = crud_user.get_by_username(db, username=username)
     if user is None:
         raise credentials_exception
     
