@@ -4,7 +4,7 @@ Employee Model
 Represents an employee in the organization.
 """
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, String, ForeignKey, Index, UniqueConstraint, Date, DECIMAL
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -17,10 +17,15 @@ class Employee(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # Personal Info
+    name = Column(String(100), nullable=False, index=True)  # Legacy field for compatibility
     full_name = Column(String(100), nullable=False, index=True)
     employee_code = Column(String(20), nullable=False, unique=True, index=True)
     email = Column(String(100), nullable=False, unique=True, index=True)
     phone = Column(String(20), nullable=True)
+    
+    # Employment Info
+    hire_date = Column(Date, nullable=True)
+    salary = Column(DECIMAL(10, 2), nullable=True)
     
     # Foreign Keys
     department_id = Column(

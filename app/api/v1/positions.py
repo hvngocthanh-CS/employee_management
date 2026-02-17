@@ -2,74 +2,47 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.core.deps import get_current_user, require_admin
+from app.core.deps import require_admin
 from app.models.user import User
 from app.models.position import PositionLevel
 from app.schemas.position import (
     PositionCreate,
     PositionUpdate,
-    PositionResponse,
-    PositionWithStats
+    PositionResponse
 )
 from app.crud import position as crud_position
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[PositionWithStats])
+@router.get("/", response_model=List[PositionResponse])
 def list_positions(
     *,
     db: Session = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    level: Optional[PositionLevel] = None,
-    current_user: User = Depends(get_current_user)
+    level: Optional[PositionLevel] = None
 ):
     """
-    List all positions với employee statistics
+    List all positions (no authentication required for GET)
     """
     if level:
-        positions_data = crud_position.get_by_level(
+        positions = crud_position.get_by_level(
             db, level=level, skip=skip, limit=limit
         )
-        # Convert to stats format
-        result = []
-        for pos in positions_data:
-            result.append(
-                PositionWithStats(
-                    **pos.__dict__,
-                    employee_count=0,
-                    active_employee_count=0
-                )
-            )
-        return result
     else:
-        positions_with_stats = crud_position.get_with_employee_stats(db)
-        
-        result = []
-        for item in positions_with_stats:
-            pos_dict = {
-                "id": item["position"].id,
-                "title": item["position"].title,
-                "code": item["position"].code,
-                "level": item["position"].level,
-                "description": item["position"].description,
-                "employee_count": item["employee_count"],
-                "active_employee_count": item["employee_count"]  # Use employee_count since no active status exists
-            }
-            result.append(PositionWithStats(**pos_dict))
-        
-        return result[skip:skip+limit]
+        positions = crud_position.get_multi(db, skip=skip, limit=limit)
+    
+    return positions
 
 
 @router.get("/{position_id}", response_model=PositionResponse)
 def get_position(
     *,
     db: Session = Depends(get_db),
-    position_id: int,
-    current_user: User = Depends(get_current_user)
+    position_id: int
 ):
-    """Get position by ID"""
+    """Get position by ID (no authentication required)"""
     position = crud_position.get(db, id=position_id)
     if not position:
         raise HTTPException(

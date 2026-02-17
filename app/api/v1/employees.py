@@ -23,6 +23,41 @@ from app.models.user import User
 router = APIRouter()
 
 
+def enhance_employee_response(employee) -> dict:
+    """
+    Convert Employee model to enhanced response with first_name/last_name split
+    and additional fields for frontend compatibility
+    """
+    # Split full_name into first_name and last_name
+    name_parts = employee.full_name.split(' ', 1) if employee.full_name else ['', '']
+    first_name = name_parts[0] if len(name_parts) > 0 else ''
+    last_name = name_parts[1] if len(name_parts) > 1 else ''
+    
+    # Format hire_date as string if it exists
+    hire_date_str = None
+    if employee.hire_date:
+        hire_date_str = employee.hire_date.isoformat() if hasattr(employee.hire_date, 'isoformat') else str(employee.hire_date)
+    
+    # Convert salary to float if it exists
+    salary_float = float(employee.salary) if employee.salary else None
+    
+    return {
+        'id': employee.id,
+        'full_name': employee.full_name,
+        'first_name': first_name,
+        'last_name': last_name,
+        'employee_code': employee.employee_code,
+        'email': employee.email,
+        'phone': employee.phone,
+        'department_id': employee.department_id,
+        'position_id': employee.position_id,
+        'hire_date': hire_date_str,
+        'salary': salary_float,
+        'department_name': getattr(employee.department, 'name', None) if hasattr(employee, 'department') and employee.department else None,
+        'position_title': getattr(employee.position, 'title', None) if hasattr(employee, 'position') and employee.position else None,
+    }
+
+
 @router.get("/", response_model=List[EmployeeResponse])
 def list_employees(
     skip: int = 0,
@@ -43,7 +78,9 @@ def list_employees(
       List of employees với full information
     """
     employees = crud_employee.get_multi(db, skip=skip, limit=limit)
-    return employees
+    # Convert to enhanced response format
+    enhanced_employees = [enhance_employee_response(emp) for emp in employees]
+    return enhanced_employees
 
 
 @router.get("/me", response_model=EmployeeResponse)
@@ -98,13 +135,18 @@ def create_employee(
         "salary": 50000.00
       }
       
+    Note: 
+      - employee_code will be auto-generated if not provided
+      - Either provide full_name OR both first_name and last_name
+      - first_name + last_name will be combined into full_name
+      
     Validation:
       - email must be unique
       - email must be a valid email format
-      - first_name and last_name are required
+      - Either full_name OR (first_name AND last_name) is required
       
     Returns:
-      The created employee với auto-generated id
+      The created employee with auto-generated id and employee_code
     """
     # Check if email already exists
     existing = crud_employee.get_by_email(db, email=employee_in.email)
@@ -116,7 +158,8 @@ def create_employee(
     
     # Create and save the new employee
     employee = crud_employee.create(db, obj_in=employee_in)
-    return employee
+    # Return enhanced response format
+    return enhance_employee_response(employee)
 
 
 @router.get("/{employee_id}", response_model=EmployeeResponse)
@@ -203,7 +246,8 @@ def update_employee(
     
     # Update employee
     employee = crud_employee.update(db, db_obj=employee, obj_in=employee_in)
-    return employee
+    # Return enhanced response format
+    return enhance_employee_response(employee)
 
 
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -236,7 +280,7 @@ def delete_employee(
         )
     
     # Delete employee (will cascade to user if exists)
-    crud_employee.remove(db, id=employee_id)
+    crud_employee.delete(db, id=employee_id)
     return None
 
 

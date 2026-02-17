@@ -1,9 +1,6 @@
 """
 API v1 Router
-=============
-Combines all v1 API routers
 """
-
 from fastapi import APIRouter
 from app.api.v1 import (
     auth,
@@ -13,19 +10,26 @@ from app.api.v1 import (
     user,
     salaries,
     attendances,
-    leaves
+    leaves,
+    health_check
 )
 
-# Create main router for API v1
 api_router = APIRouter()
 
-# Include all routers
+# Health check
+api_router.include_router(
+    health_check.router,
+    tags=["Health"]
+)
+
+# Authentication
 api_router.include_router(
     auth.router,
     prefix="/auth",
     tags=["Authentication"]
 )
 
+# Resources
 api_router.include_router(
     departments.router,
     prefix="/departments",
