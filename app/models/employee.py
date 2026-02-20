@@ -25,7 +25,8 @@ class Employee(Base):
     
     # Employment Info
     hire_date = Column(Date, nullable=True)
-    salary = Column(DECIMAL(10, 2), nullable=True)
+    # note: Salary is stored in separate 'salaries' table (see relationship below)
+    # This allows salary history tracking with effective_from/effective_to dates
     
     # Foreign Keys
     department_id = Column(

@@ -11,7 +11,8 @@ from app.api.v1 import (
     user,
     salaries,
     attendances,
-    leaves
+    leaves,
+    statistics
 )
 
 api_router = APIRouter()
@@ -70,4 +71,10 @@ api_router.include_router(
     leaves.router,
     prefix="/leaves",
     tags=["Leaves"]
+)
+
+api_router.include_router(
+    statistics.router,
+    prefix="/statistics",
+    tags=["Statistics"]
 )

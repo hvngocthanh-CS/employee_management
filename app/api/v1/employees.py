@@ -12,13 +12,15 @@ Roles:
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import date
 import logging
 from app.database import get_db
 from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse
 from app.crud import employee as crud_employee
 from app.core.permissions import PermissionDependencies, check_resource_ownership
 from app.core.deps import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole
+from app.core.security import get_password_hash
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -42,8 +44,20 @@ def enhance_employee_response(employee) -> dict:
     if employee.hire_date:
         hire_date_str = employee.hire_date.isoformat() if hasattr(employee.hire_date, 'isoformat') else str(employee.hire_date)
     
-    # Convert salary to float if it exists
-    salary_float = float(employee.salary) if employee.salary else None
+    # Get current salary from salaries relationship (where effective_to IS NULL OR >= today)
+    # SQL Logic: current = (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+    # Order by effective_from DESC to get most recent
+    salary_float = None
+    if hasattr(employee, 'salaries'):
+        today = date.today()
+        current_salaries = [
+            s for s in employee.salaries 
+            if s.effective_to is None or s.effective_to >= today
+        ]
+        if current_salaries:
+            # Sort by effective_from descending to get most recent salary
+            current_salaries.sort(key=lambda x: x.effective_from, reverse=True)
+            salary_float = float(current_salaries[0].base_salary)
     
     return {
         'id': employee.id,
@@ -96,11 +110,12 @@ def list_employees(
             (Employee.full_name.ilike(search_term)) |
             (Employee.email.ilike(search_term))
         )
-        # Apply eager loading
+        # Apply eager loading (prevent N+1 query problem)
         from sqlalchemy.orm import joinedload
         query = query.options(
             joinedload(Employee.department),
-            joinedload(Employee.position)
+            joinedload(Employee.position),
+            joinedload(Employee.salaries)  # Load salary data (FK relationship)
         )
         employees = query.offset(skip).limit(limit).all()
     else:
@@ -131,7 +146,8 @@ def get_my_employee_data(
             detail="No employee record found for this user"
         )
     
-    employee = crud_employee.get(db, id=current_user.employee_id)
+    # Use get_by_id_with_relations to eager load department, position, and salaries
+    employee = crud_employee.get_by_id_with_relations(db, id=current_user.employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -180,9 +196,6 @@ def create_employee(
     Returns:
       The created employee with auto-generated id and employee_code
     """
-    from app.models.user import UserRole
-    from app.core.security import get_password_hash
-    from app.crud.user import user as crud_user
     
     logger.info(f"Creating new employee: {employee_in.email}")
     
@@ -268,7 +281,8 @@ def get_employee(
             detail="You can only access your own employee record"
         )
     
-    employee = crud_employee.get(db, id=employee_id)
+    # Use get_by_id_with_relations to eager load department, position, and salaries
+    employee = crud_employee.get_by_id_with_relations(db, id=employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -326,6 +340,10 @@ def update_employee(
     
     # Update employee
     employee = crud_employee.update(db, db_obj=employee, obj_in=employee_in)
+    
+    # Reload employee with relationships (department, position, salaries) for response
+    employee = crud_employee.get_by_id_with_relations(db, id=employee_id)
+    
     # Return enhanced response format
     return enhance_employee_response(employee)
 
@@ -424,7 +442,8 @@ def get_my_profile(
             detail="No employee record found for current user"
         )
     
-    employee = crud_employee.get(db, id=current_user.employee_id)
+    # Use get_by_id_with_relations to eager load department, position, and salaries
+    employee = crud_employee.get_by_id_with_relations(db, id=current_user.employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

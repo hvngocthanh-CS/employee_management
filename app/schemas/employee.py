@@ -63,10 +63,8 @@ class EmployeeCreate(BaseModel):
         None,
         description="Hire date (YYYY-MM-DD)"
     )
-    salary: Optional[float] = Field(
-        None,
-        description="Salary (ignored for now, future enhancement)"
-    )
+    # NOTE: Salary is managed separately via /api/v1/salaries endpoints
+    # See SalaryCreate schema for adding salary records
     
     @field_validator('phone')
     @classmethod
@@ -139,10 +137,8 @@ class EmployeeUpdate(BaseModel):
         None,
         description="Hire date (YYYY-MM-DD format)"
     )
-    salary: Optional[float] = Field(
-        None,
-        description="Salary amount"
-    )
+    # NOTE: Salary is managed separately via /api/v1/salaries endpoints
+    # Cannot update salary directly on employee - maintains data integrity
     
     @field_validator('phone')
     @classmethod

@@ -47,7 +47,8 @@ class CRUDEmployee(CRUDBase[Employee, EmployeeCreate, EmployeeUpdate]):
             db.query(self.model)
             .options(
                 joinedload(Employee.department),
-                joinedload(Employee.position)
+                joinedload(Employee.position),
+                joinedload(Employee.salaries)  # Load salary data (FK relationship)
             )
             .offset(skip)
             .limit(limit)
@@ -69,7 +70,8 @@ class CRUDEmployee(CRUDBase[Employee, EmployeeCreate, EmployeeUpdate]):
             db.query(self.model)
             .options(
                 joinedload(Employee.department),
-                joinedload(Employee.position)
+                joinedload(Employee.position),
+                joinedload(Employee.salaries)  # Load salary data (FK relationship)
             )
             .filter(self.model.id == id)
             .first()
