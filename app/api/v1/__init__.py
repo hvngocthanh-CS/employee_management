@@ -4,22 +4,22 @@ API v1 Router
 from fastapi import APIRouter
 from app.api.v1 import (
     auth,
+    common,
     departments,
     employees,
     positions,
     user,
     salaries,
     attendances,
-    leaves,
-    health_check
+    leaves
 )
 
 api_router = APIRouter()
 
-# Health check
+# Common endpoints (health check, ping, version)
 api_router.include_router(
-    health_check.router,
-    tags=["Health"]
+    common.router,
+    tags=["Common"]
 )
 
 # Authentication

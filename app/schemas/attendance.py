@@ -53,10 +53,16 @@ class AttendanceUpdate(BaseModel):
         return v
 
 
-class AttendanceResponse(AttendanceBase):
+class AttendanceResponse(BaseModel):
     """Schema cho response"""
     id: int
-    created_at: datetime
+    employee_id: int
+    date: DateType = Field(..., description="Attendance date")
+    attendance_date: DateType = Field(..., description="Attendance date (alias for frontend)")
+    check_in_time: Optional[time] = Field(None, description="Check-in time")
+    check_out_time: Optional[time] = Field(None, description="Check-out time")
+    status: AttendanceStatus = Field(..., description="Attendance status")
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
     # Nested data
@@ -69,18 +75,57 @@ class AttendanceResponse(AttendanceBase):
     
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 class AttendanceCheckIn(BaseModel):
     """Schema cho check-in nhanh"""
     employee_id: int
-    check_in_time: Optional[time] = None  # None = thời gian hiện tại
+    check_in_time: Optional[datetime] = None  # Accept datetime from frontend
+    
+    @field_validator('check_in_time', mode='before')
+    @classmethod
+    def parse_check_in_time(cls, v):
+        """Parse datetime to time or keep None for current time"""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            # Parse ISO datetime string from frontend
+            try:
+                dt = datetime.fromisoformat(v.replace('Z', '+00:00'))
+                return dt
+            except:
+                # Try parsing as time only
+                from datetime import time as Time
+                return datetime.strptime(v, '%H:%M:%S').time()
+        if isinstance(v, datetime):
+            return v  # Keep as datetime, will extract time in endpoint
+        return v
 
 
 class AttendanceCheckOut(BaseModel):
     """Schema cho check-out nhanh"""
     employee_id: int
-    check_out_time: Optional[time] = None  # None = thời gian hiện tại
+    check_out_time: Optional[datetime] = None  # Accept datetime from frontend
+    
+    @field_validator('check_out_time', mode='before')
+    @classmethod
+    def parse_check_out_time(cls, v):
+        """Parse datetime to time or keep None for current time"""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            # Parse ISO datetime string from frontend
+            try:
+                dt = datetime.fromisoformat(v.replace('Z', '+00:00'))
+                return dt
+            except:
+                # Try parsing as time only
+                from datetime import time as Time
+                return datetime.strptime(v, '%H:%M:%S').time()
+        if isinstance(v, datetime):
+            return v  # Keep as datetime, will extract time in endpoint
+        return v
 
 
 class AttendanceReport(BaseModel):

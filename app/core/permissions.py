@@ -68,7 +68,7 @@ class Permission(str, Enum):
 # Role-Permission Mapping
 ROLE_PERMISSIONS: dict[UserRole, List[Permission]] = {
     UserRole.ADMIN: [
-        # Admin has all permissions
+        # Admin: Tạo user ✅, Xóa user ✅, Gán role ✅, Xem DS nhân viên ✅, Xem thông tin bản thân ✅, Chấm công ❌
         Permission.CREATE_USER, Permission.READ_USER, Permission.UPDATE_USER, Permission.DELETE_USER,
         Permission.CREATE_EMPLOYEE, Permission.READ_EMPLOYEE, Permission.UPDATE_EMPLOYEE, Permission.DELETE_EMPLOYEE,
         Permission.CREATE_DEPARTMENT, Permission.READ_DEPARTMENT, Permission.UPDATE_DEPARTMENT, Permission.DELETE_DEPARTMENT,
@@ -76,29 +76,30 @@ ROLE_PERMISSIONS: dict[UserRole, List[Permission]] = {
         Permission.CREATE_SALARY, Permission.READ_SALARY, Permission.UPDATE_SALARY, Permission.DELETE_SALARY,
         Permission.CREATE_ATTENDANCE, Permission.READ_ATTENDANCE, Permission.UPDATE_ATTENDANCE, Permission.DELETE_ATTENDANCE,
         Permission.CREATE_LEAVE, Permission.READ_LEAVE, Permission.UPDATE_LEAVE, Permission.DELETE_LEAVE, Permission.APPROVE_LEAVE,
+        # Own data access
+        Permission.READ_OWN_EMPLOYEE_DATA, Permission.READ_OWN_SALARY, Permission.READ_OWN_ATTENDANCE, Permission.READ_OWN_LEAVE,
     ],
     
     UserRole.MANAGER: [
-        # Manager can manage employees, departments, positions, and approve leaves
-        Permission.READ_USER,
+        # Manager: Tạo user ✅, Xóa user ❌, Gán role ❌, Xem DS nhân viên ✅, Xem thông tin bản thân ✅, Chấm công ❌
+        Permission.CREATE_USER, Permission.READ_USER,
         Permission.CREATE_EMPLOYEE, Permission.READ_EMPLOYEE, Permission.UPDATE_EMPLOYEE,
         Permission.CREATE_DEPARTMENT, Permission.READ_DEPARTMENT, Permission.UPDATE_DEPARTMENT,
         Permission.CREATE_POSITION, Permission.READ_POSITION, Permission.UPDATE_POSITION,
         Permission.CREATE_SALARY, Permission.READ_SALARY, Permission.UPDATE_SALARY,
-        Permission.READ_ATTENDANCE, Permission.UPDATE_ATTENDANCE,
-        Permission.READ_LEAVE, Permission.UPDATE_LEAVE, Permission.APPROVE_LEAVE,
+        Permission.CREATE_ATTENDANCE, Permission.READ_ATTENDANCE, Permission.UPDATE_ATTENDANCE,
+        Permission.CREATE_LEAVE, Permission.READ_LEAVE, Permission.UPDATE_LEAVE, Permission.APPROVE_LEAVE,
         # Own data access
-        Permission.READ_OWN_EMPLOYEE_DATA, Permission.READ_OWN_SALARY, 
-        Permission.READ_OWN_ATTENDANCE, Permission.MARK_OWN_ATTENDANCE,
-        Permission.READ_OWN_LEAVE, Permission.REQUEST_OWN_LEAVE,
+        Permission.READ_OWN_EMPLOYEE_DATA, Permission.READ_OWN_SALARY,
+        Permission.READ_OWN_ATTENDANCE, Permission.READ_OWN_LEAVE, Permission.REQUEST_OWN_LEAVE,
     ],
     
     UserRole.EMPLOYEE: [
-        # Employee can only access their own data and basic read operations
+        # Employee: Tạo user ❌, Xóa user ❌, Gán role ❌, Xem DS nhân viên ❌, Xem thông tin bản thân ✅, Chấm công ✅
         Permission.READ_DEPARTMENT, Permission.READ_POSITION,
         # Own data access only
         Permission.READ_OWN_EMPLOYEE_DATA, Permission.READ_OWN_SALARY,
-        Permission.READ_OWN_ATTENDANCE, Permission.MARK_OWN_ATTENDANCE,
+        Permission.READ_OWN_ATTENDANCE, Permission.MARK_OWN_ATTENDANCE,  # Chấm công cho chính mình
         Permission.READ_OWN_LEAVE, Permission.REQUEST_OWN_LEAVE,
     ]
 }
@@ -248,8 +249,8 @@ def get_menu_permissions(user: User) -> dict:
     
     return {
         "dashboard": True,  # Everyone can see dashboard
-        "employees": Permission.READ_EMPLOYEE.value in permissions or Permission.READ_OWN_EMPLOYEE_DATA.value in permissions,
-        "users": Permission.READ_USER.value in permissions,
+        "employees": Permission.READ_EMPLOYEE.value in permissions,  # Only Manager/Admin see employee list
+        "users": Permission.READ_USER.value in permissions,  # Only Manager/Admin
         "departments": Permission.READ_DEPARTMENT.value in permissions,
         "positions": Permission.READ_POSITION.value in permissions,
         "salaries": Permission.READ_SALARY.value in permissions or Permission.READ_OWN_SALARY.value in permissions,

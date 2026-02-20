@@ -2,10 +2,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.core.deps import get_current_user, require_admin
+from app.core.deps import get_current_user
+from app.core.permissions import PermissionDependencies
 from app.models.user import User, UserRole
 from app.schemas.user import (
     UserCreate,
+    UserCreateForEmployee,
     UserUpdate,
     UserResponse,
     UserListResponse,
@@ -25,11 +27,11 @@ def list_users(
     limit: int = Query(100, ge=1, le=1000),
     role: Optional[UserRole] = None,
     is_active: Optional[bool] = None,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_read_user)
 ):
     """
     List all users
-    Yêu cầu role ADMIN
+    Permissions: Admin only
     """
     users = crud_user.get_multi_with_employee(
         db,
@@ -40,13 +42,13 @@ def list_users(
     )
     
     # Count total
-    filters = {}
+    count_query = db.query(User)
     if role:
-        filters['role'] = role
+        count_query = count_query.filter(User.role == role)
     if is_active is not None:
-        filters['is_active'] = is_active
+        count_query = count_query.filter(User.is_active == is_active)
     
-    total = crud_user.count(db, filters=filters)
+    total = count_query.count()
     
     # Convert to response
     user_responses = []
@@ -110,11 +112,11 @@ def get_user(
     *,
     db: Session = Depends(get_db),
     user_id: int,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_read_user)
 ):
     """
     Get user by ID
-    Yêu cầu role ADMIN
+    Permissions: Admin only
     """
     user = crud_user.get_with_employee(db, id=user_id)
     if not user:
@@ -135,12 +137,13 @@ def get_user(
 def create_user(
     *,
     db: Session = Depends(get_db),
-    user_in: UserCreate,
-    current_user: User = Depends(require_admin)
+    user_in: UserCreateForEmployee,
+    current_user: User = Depends(PermissionDependencies.can_create_user)
 ):
     """
-    Create new user
-    Yêu cầu role ADMIN
+    Create new user for employees
+    Permissions: Admin, Manager
+    Must provide employee_id - used to create account for employee
     """
     try:
         user = crud_user.create(db, obj_in=user_in)
@@ -164,11 +167,11 @@ def update_user(
     db: Session = Depends(get_db),
     user_id: int,
     user_in: UserUpdate,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_update_user)
 ):
     """
     Update user
-    Yêu cầu role ADMIN
+    Permissions: Admin only
     """
     user = crud_user.get(db, id=user_id)
     if not user:
@@ -229,11 +232,11 @@ def reset_password(
     db: Session = Depends(get_db),
     user_id: int,
     new_password: str = Query(..., min_length=6),
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_update_user)
 ):
     """
-    Reset password của user khác (admin function)
-    Yêu cầu role ADMIN
+    Reset password for another user (admin function)
+    Permissions: Admin only
     """
     user = crud_user.get(db, id=user_id)
     if not user:
@@ -251,11 +254,11 @@ def activate_user(
     *,
     db: Session = Depends(get_db),
     user_id: int,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_update_user)
 ):
     """
     Activate user account
-    Yêu cầu role ADMIN
+    Permissions: Admin only
     """
     user = crud_user.get(db, id=user_id)
     if not user:
@@ -279,11 +282,11 @@ def deactivate_user(
     *,
     db: Session = Depends(get_db),
     user_id: int,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_update_user)
 ):
     """
     Deactivate user account
-    Yêu cầu role ADMIN
+    Permissions: Admin only
     """
     # Không cho phép admin tự deactivate chính mình
     if user_id == current_user.id:
@@ -316,11 +319,11 @@ def get_users_by_role(
     role: UserRole,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_read_user)
 ):
     """
     Get users by role
-    Yêu cầu role ADMIN
+    Permissions: Admin only
     """
     users = crud_user.get_users_by_role(
         db, role=role, skip=skip, limit=limit
@@ -354,19 +357,19 @@ def get_users_by_role(
 def get_user_statistics(
     *,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_read_user)
 ):
     """
-    Thống kê số lượng users theo role
-    Yêu cầu role ADMIN
+    Get user count statistics by role
+    Permissions: Admin only
     """
     stats = {}
     for role in UserRole:
         count = crud_user.count_by_role(db, role=role)
         stats[role.value] = count
     
-    total_active = crud_user.count(db, filters={"is_active": True})
-    total_inactive = crud_user.count(db, filters={"is_active": False})
+    total_active = db.query(User).filter(User.is_active == True).count()
+    total_inactive = db.query(User).filter(User.is_active == False).count()
     
     return {
         "by_role": stats,
@@ -381,11 +384,11 @@ def delete_user(
     *,
     db: Session = Depends(get_db),
     user_id: int,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_delete_user)
 ):
     """
     Delete user
-    Yêu cầu role ADMIN
+    Permissions: Admin only
     """
     # Không cho phép admin tự xóa chính mình
     if user_id == current_user.id:

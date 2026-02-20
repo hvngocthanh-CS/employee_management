@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
 from app.crud import department as crud_department
+from app.core.permissions import PermissionDependencies
+from app.models.user import User
 
 # Create router for department endpoints
 router = APIRouter()
@@ -44,10 +46,12 @@ def list_departments(
 @router.post("/", response_model=DepartmentResponse, status_code=status.HTTP_201_CREATED)
 def create_department(
     department_in: DepartmentCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(PermissionDependencies.can_create_department)
 ):
     """
     Create a new department.
+    Yêu cầu quyền CREATE_DEPARTMENT (Admin/Manager)
     
     Request Body:
       {
@@ -102,10 +106,12 @@ def get_department(
 def update_department(
     department_id: int,
     department_in: DepartmentUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(PermissionDependencies.can_update_department)
 ):
     """
     Update a department.
+    Yêu cầu quyền UPDATE_DEPARTMENT (Admin/Manager)
     
     Path Parameters:
       department_id: The department's primary key
@@ -142,10 +148,12 @@ def update_department(
 @router.delete("/{department_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_department(
     department_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(PermissionDependencies.can_delete_department)
 ):
     """
     Delete a department by ID.
+    Yêu cầu quyền DELETE_DEPARTMENT (Admin only)
     
     Path Parameters:
       department_id: The department's primary key

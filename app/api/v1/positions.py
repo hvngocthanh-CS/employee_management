@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.core.deps import require_admin
+from app.core.permissions import PermissionDependencies
 from app.models.user import User
 from app.models.position import PositionLevel
 from app.schemas.position import (
@@ -57,11 +57,11 @@ def create_position(
     *,
     db: Session = Depends(get_db),
     position_in: PositionCreate,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_create_position)
 ):
     """
     Create new position
-    Yêu cầu role ADMIN
+    Permissions: Admin, Manager
     """
     # Check if code exists
     existing = crud_position.get_by_code(db, code=position_in.code)
@@ -81,11 +81,11 @@ def update_position(
     db: Session = Depends(get_db),
     position_id: int,
     position_in: PositionUpdate,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_update_position)
 ):
     """
     Update position
-    Yêu cầu role ADMIN
+    Permissions: Admin, Manager
     """
     position = crud_position.get(db, id=position_id)
     if not position:
@@ -112,11 +112,11 @@ def delete_position(
     *,
     db: Session = Depends(get_db),
     position_id: int,
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(PermissionDependencies.can_delete_position)
 ):
     """
     Delete position
-    Yêu cầu role ADMIN
+    Permissions: Admin only
     """
     position = crud_position.get(db, id=position_id)
     if not position:

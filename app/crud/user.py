@@ -4,7 +4,7 @@ from datetime import datetime
 from app.crud.base import CRUDBase
 from app.models.user import User, UserRole
 from app.models.employee import Employee
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import UserCreate, UserCreateForEmployee, UserUpdate
 from app.core.security import get_password_hash, verify_password
 
 
@@ -47,9 +47,9 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         
         return query.offset(skip).limit(limit).all()
     
-    def create(self, db: Session, *, obj_in: UserCreate) -> User:
+    def create(self, db: Session, *, obj_in: UserCreateForEmployee) -> User:
         """
-        Create user với hashed password
+        Create user với hashed password - cho employee (có employee_id)
         Override base create method
         """
         # Check if employee exists
@@ -72,7 +72,7 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             username=obj_in.username.lower(),
             hashed_password=get_password_hash(obj_in.password),
             role=obj_in.role,
-            is_active=obj_in.is_active
+            is_active=True
         )
         db.add(db_obj)
         db.commit()

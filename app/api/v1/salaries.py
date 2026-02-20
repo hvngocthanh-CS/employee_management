@@ -4,7 +4,8 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.core.deps import get_current_user, require_manager_or_admin
+from app.core.deps import get_current_user
+from app.core.permissions import check_resource_ownership, PermissionDependencies
 from app.models.user import User
 from app.schemas.salary import (
     SalaryCreate,
@@ -18,6 +19,46 @@ from app.crud import salary as crud_salary, employee as crud_employee
 router = APIRouter()
 
 
+@router.get("/", response_model=List[SalaryResponse])
+def list_all_salaries(
+    *,
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1),
+    employee_id: Optional[int] = None,
+    current_user: User = Depends(PermissionDependencies.can_read_salary)
+):
+    """
+    List all salary records (Admin/Manager only)
+    Permissions: Admin, Manager
+    
+    Query Parameters:
+      skip: Number of records to skip
+      limit: Maximum records to return
+      employee_id: Filter by specific employee (optional)
+    """
+    # Admin/Manager can view all salaries
+    if employee_id:
+        salaries = crud_salary.get_by_employee(db, employee_id=employee_id, skip=skip, limit=limit)
+    else:
+        # Get all salaries from all employees
+        salaries = crud_salary.get_multi(db, skip=skip, limit=limit)
+    
+    # Add employee info to each salary
+    result = []
+    for salary in salaries:
+        employee = crud_employee.get(db, id=salary.employee_id)
+        result.append(
+            SalaryResponse(
+                **salary.__dict__,
+                employee_name=employee.full_name if employee else None,
+                employee_code=employee.employee_code if employee else None
+            )
+        )
+    
+    return result
+
+
 @router.get("/employee/{employee_id}", response_model=List[SalaryResponse])
 def get_employee_salaries(
     *,
@@ -29,14 +70,21 @@ def get_employee_salaries(
 ):
     """Get all salary records của một nhân viên"""
     # Check employee exists
-    employee = crud_employee.employee.get(db, id=employee_id)
+    employee = crud_employee.get(db, id=employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Employee not found"
         )
     
-    salaries = crud_salary.salary.get_by_employee(
+    # Check permission: Admin/Manager can view any, Employee can only view own
+    if not check_resource_ownership(current_user, employee_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own salary information"
+        )
+    
+    salaries = crud_salary.get_by_employee(
         db, employee_id=employee_id, skip=skip, limit=limit
     )
     
@@ -61,14 +109,21 @@ def get_current_salary(
 ):
     """Get lương hiện tại của nhân viên"""
     # Check employee exists
-    employee = crud_employee.employee.get(db, id=employee_id)
+    employee = crud_employee.get(db, id=employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Employee not found"
         )
     
-    salary = crud_salary.salary.get_current_salary(
+    # Check permission: Admin/Manager can view any, Employee can only view own
+    if not check_resource_ownership(current_user, employee_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own salary information"
+        )
+    
+    salary = crud_salary.get_current_salary(
         db, employee_id=employee_id, as_of_date=as_of_date
     )
     
@@ -93,17 +148,24 @@ def get_salary_history(
     current_user: User = Depends(get_current_user)
 ):
     """Get toàn bộ lịch sử lương"""
-    employee = crud_employee.employee.get(db, id=employee_id)
+    employee = crud_employee.get(db, id=employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Employee not found"
         )
     
-    salaries = crud_salary.salary.get_salary_history(db, employee_id=employee_id)
+    # Check permission: Admin/Manager can view any, Employee can only view own
+    if not check_resource_ownership(current_user, employee_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own salary information"
+        )
+    
+    salaries = crud_salary.get_salary_history(db, employee_id=employee_id)
     
     # Get current salary
-    current = crud_salary.salary.get_current_salary(db, employee_id=employee_id)
+    current = crud_salary.get_current_salary(db, employee_id=employee_id)
     current_amount = current.base_salary if current else None
     
     salary_responses = [
@@ -129,22 +191,29 @@ def create_salary(
     *,
     db: Session = Depends(get_db),
     salary_in: SalaryCreate,
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_create_salary)
 ):
     """
     Create new salary record
-    Yêu cầu role MANAGER hoặc ADMIN
+    Permissions: Admin, Manager
     """
     # Check employee exists
-    employee = crud_employee.employee.get(db, id=salary_in.employee_id)
+    employee = crud_employee.get(db, id=salary_in.employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Employee not found"
         )
     
+    # Validate: effective_from must be >= employee hire_date
+    if employee.hire_date and salary_in.effective_from < employee.hire_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Ngày hiệu lực lương ({salary_in.effective_from}) phải >= ngày thuê nhân viên ({employee.hire_date})"
+        )
+    
     # Check for overlapping salary periods
-    existing_current = crud_salary.salary.get_current_salary(
+    existing_current = crud_salary.get_current_salary(
         db, 
         employee_id=salary_in.employee_id,
         as_of_date=salary_in.effective_from
@@ -156,7 +225,7 @@ def create_salary(
             detail="Employee already has an active salary. Please close it first."
         )
     
-    salary = crud_salary.salary.create(db, obj_in=salary_in)
+    salary = crud_salary.create(db, obj_in=salary_in)
     
     return SalaryResponse(
         **salary.__dict__,
@@ -171,22 +240,31 @@ def update_salary(
     db: Session = Depends(get_db),
     salary_id: int,
     salary_in: SalaryUpdate,
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_update_salary)
 ):
     """
     Update salary record
-    Yêu cầu role MANAGER hoặc ADMIN
+    Permissions: Admin, Manager
     """
-    salary = crud_salary.salary.get(db, id=salary_id)
+    salary = crud_salary.get(db, id=salary_id)
     if not salary:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Salary record not found"
         )
     
-    salary = crud_salary.salary.update(db, db_obj=salary, obj_in=salary_in)
+    # Validate: effective_from must be >= employee hire_date (if being updated)
+    if salary_in.effective_from is not None:
+        employee = crud_employee.get(db, id=salary.employee_id)
+        if employee and employee.hire_date and salary_in.effective_from < employee.hire_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ngày hiệu lực lương ({salary_in.effective_from}) phải >= ngày thuê nhân viên ({employee.hire_date})"
+            )
     
-    employee = crud_employee.employee.get(db, id=salary.employee_id)
+    salary = crud_salary.update(db, db_obj=salary, obj_in=salary_in)
+    
+    employee = crud_employee.get(db, id=salary.employee_id)
     
     return SalaryResponse(
         **salary.__dict__,
@@ -202,13 +280,13 @@ def update_current_salary(
     employee_id: int,
     new_salary: Decimal = Query(..., gt=0),
     effective_from: date = Query(default_factory=date.today),
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_update_salary)
 ):
     """
-    Cập nhật lương hiện tại (đóng lương cũ, tạo lương mới)
-    Yêu cầu role MANAGER hoặc ADMIN
+    Update current salary (close old, create new)
+    Permissions: Admin, Manager
     """
-    employee = crud_employee.employee.get(db, id=employee_id)
+    employee = crud_employee.get(db, id=employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -216,7 +294,7 @@ def update_current_salary(
         )
     
     try:
-        salary = crud_salary.salary.update_current_salary(
+        salary = crud_salary.update_current_salary(
             db,
             employee_id=employee_id,
             new_salary=new_salary,
@@ -240,13 +318,13 @@ def get_salary_statistics(
     *,
     db: Session = Depends(get_db),
     department_id: Optional[int] = None,
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_read_salary)
 ):
     """
-    Thống kê lương theo phòng ban
-    Yêu cầu role MANAGER hoặc ADMIN
+    Get salary statistics by department
+    Permissions: Admin, Manager
     """
-    stats = crud_salary.salary.get_salary_statistics(db, department_id=department_id)
+    stats = crud_salary.get_salary_statistics(db, department_id=department_id)
     
     return [SalaryStatistics(**stat) for stat in stats]
 
@@ -256,19 +334,115 @@ def delete_salary(
     *,
     db: Session = Depends(get_db),
     salary_id: int,
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_delete_salary)
 ):
     """
     Delete salary record
-    Yêu cầu role MANAGER hoặc ADMIN
-    Chỉ nên xóa nếu tạo nhầm, thông thường nên set effective_to
+    Permissions: Admin only
+    Note: Only delete if created by mistake, normally should set effective_to
     """
-    salary = crud_salary.salary.get(db, id=salary_id)
+    salary = crud_salary.get(db, id=salary_id)
     if not salary:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Salary record not found"
         )
     
-    crud_salary.salary.delete(db, id=salary_id)
+    crud_salary.delete(db, id=salary_id)
     return None
+
+
+@router.get("/my-salary", response_model=SalaryResponse)
+def get_my_current_salary(
+    *,
+    db: Session = Depends(get_db),
+    as_of_date: Optional[date] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get current user's current salary record.
+    
+    Permissions: All authenticated users with employee_id
+    
+    Query Parameters:
+      as_of_date: Get salary as of specific date (YYYY-MM-DD)
+      
+    Returns:
+      Current user's active salary record
+    """
+    if not current_user.employee_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No employee record found for current user"
+        )
+    
+    employee = crud_employee.get(db, id=current_user.employee_id)
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee record not found"
+        )
+    
+    salary = crud_salary.get_current_salary(
+        db, employee_id=current_user.employee_id, as_of_date=as_of_date
+    )
+    
+    if not salary:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No salary record found"
+        )
+    
+    return SalaryResponse(
+        **salary.__dict__,
+        employee_name=employee.full_name,
+        employee_code=employee.employee_code
+    )
+
+
+@router.get("/my-salaries", response_model=List[SalaryResponse])
+def get_my_salary_history(
+    *,
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get current user's salary history.
+    
+    Permissions: All authenticated users with employee_id
+    
+    Query Parameters:
+      skip: Number of records to skip
+      limit: Maximum records to return
+      
+    Returns:
+      List of current user's salary records
+    """
+    if not current_user.employee_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No employee record found for current user"
+        )
+    
+    employee = crud_employee.get(db, id=current_user.employee_id)
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee record not found"
+        )
+    
+    salaries = crud_salary.get_by_employee(
+        db, employee_id=current_user.employee_id, skip=skip, limit=limit
+    )
+    
+    # Add employee info to response
+    result = []
+    for sal in salaries:
+        sal_dict = sal.__dict__.copy()
+        sal_dict['employee_name'] = employee.full_name
+        sal_dict['employee_code'] = employee.employee_code
+        result.append(SalaryResponse(**sal_dict))
+    
+    return result

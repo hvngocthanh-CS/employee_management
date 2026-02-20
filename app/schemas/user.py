@@ -12,7 +12,23 @@ class UserBase(BaseModel):
 
 
 class UserCreate(BaseModel):
-    """Schema cho tạo User mới - với role selection"""
+    """Schema cho admin/manager tự đăng ký - không cần employee_id"""
+    username: str = Field(..., min_length=3, max_length=50, description="Username duy nhất")
+    password: str = Field(..., min_length=6, description="Password (tối thiểu 6 ký tự)")
+    role: UserRole = Field(default=UserRole.EMPLOYEE, description="User role")
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        """Validate password strength"""
+        if len(v) < 6:
+            raise ValueError('Password phải có ít nhất 6 ký tự')
+        return v
+
+
+class UserCreateForEmployee(BaseModel):
+    """Schema cho admin/manager tạo tài khoản cho employee - cần employee_id"""
+    employee_id: int = Field(..., description="ID nhân viên (phải tồn tại)")
     username: str = Field(..., min_length=3, max_length=50, description="Username duy nhất")
     password: str = Field(..., min_length=6, description="Password (tối thiểu 6 ký tự)")
     role: UserRole = Field(default=UserRole.EMPLOYEE, description="User role")
@@ -85,9 +101,37 @@ class UserChangePassword(BaseModel):
 
 
 class UserLogin(BaseModel):
-    """Schema cho login"""
-    username: str = Field(..., description="Username")
+    """Schema cho login - hỗ trợ cả email (employee) và username (admin/manager)"""
+    identifier: str = Field(..., description="Email (for employees) or Username (for admin/manager)")
     password: str = Field(..., description="Password")
+
+
+class ChangePasswordRequest(BaseModel):
+    """Schema cho đổi password của chính mình"""
+    current_password: str = Field(..., description="Current password for verification")
+    new_password: str = Field(..., min_length=6, description="New password (minimum 6 characters)")
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, v):
+        """Validate new password strength"""
+        if len(v) < 6:
+            raise ValueError('New password must be at least 6 characters')
+        return v
+
+
+class ResetPasswordRequest(BaseModel):
+    """Schema cho admin/manager reset password của employee"""
+    user_id: int = Field(..., description="User ID to reset password")
+    new_password: str = Field(..., min_length=6, description="New password (minimum 6 characters)")
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, v):
+        """Validate new password strength"""
+        if len(v) < 6:
+            raise ValueError('New password must be at least 6 characters')
+        return v
 
 
 class UserProfile(BaseModel):

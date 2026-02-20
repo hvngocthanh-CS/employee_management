@@ -6,6 +6,8 @@ Pydantic models for request/response validation.
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional
+from datetime import date
+import re
 
 
 class EmployeeCreate(BaseModel):
@@ -39,6 +41,11 @@ class EmployeeCreate(BaseModel):
         ...,
         description="Employee email (must be unique)"
     )
+    password: str = Field(
+        ...,
+        min_length=6,
+        description="Initial password for employee account (minimum 6 characters)"
+    )
     phone: Optional[str] = Field(
         None,
         max_length=20,
@@ -52,14 +59,30 @@ class EmployeeCreate(BaseModel):
         None,
         description="Position ID (foreign key)"
     )
-    hire_date: Optional[str] = Field(
+    hire_date: Optional[date] = Field(
         None,
-        description="Hire date (ignored for now, future enhancement)"
+        description="Hire date (YYYY-MM-DD)"
     )
     salary: Optional[float] = Field(
         None,
         description="Salary (ignored for now, future enhancement)"
     )
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        """Validate phone number format (basic check)"""
+        if v and not re.match(r'^[0-9+\-\s()]{8,20}$', v):
+            raise ValueError('Số điện thoại không hợp lệ (8-20 chữ số, có thể có +, -, khoảng trắng, dấu ngoặc)')
+        return v
+    
+    @field_validator('hire_date')
+    @classmethod
+    def validate_hire_date(cls, v):
+        """Hire date must not be in the future"""
+        if v and v > date.today():
+            raise ValueError('Ngày thuê không được trong tương lai')
+        return v
     
     @model_validator(mode='after')
     def validate_name_fields(self):
@@ -75,7 +98,19 @@ class EmployeeUpdate(BaseModel):
         None,
         min_length=1,
         max_length=100,
-        description="Employee full name"
+        description="Employee full name (optional if first_name/last_name provided)"
+    )
+    first_name: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=50,
+        description="Employee first name"
+    )
+    last_name: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=50,
+        description="Employee last name"
     )
     employee_code: Optional[str] = Field(
         None,
@@ -100,7 +135,7 @@ class EmployeeUpdate(BaseModel):
         None,
         description="Position ID"
     )
-    hire_date: Optional[str] = Field(
+    hire_date: Optional[date] = Field(
         None,
         description="Hire date (YYYY-MM-DD format)"
     )
@@ -108,6 +143,22 @@ class EmployeeUpdate(BaseModel):
         None,
         description="Salary amount"
     )
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        """Validate phone number format"""
+        if v and not re.match(r'^[0-9+\-\s()]{8,20}$', v):
+            raise ValueError('Số điện thoại không hợp lệ')
+        return v
+    
+    @field_validator('hire_date')
+    @classmethod
+    def validate_hire_date(cls, v):
+        """Hire date must not be in the future"""
+        if v and v > date.today():
+            raise ValueError('Ngày thuê không được trong tương lai')
+        return v
 
 
 class EmployeeResponse(BaseModel):
@@ -121,7 +172,7 @@ class EmployeeResponse(BaseModel):
     phone: Optional[str] = None
     department_id: Optional[int] = None
     position_id: Optional[int] = None
-    hire_date: Optional[str] = None  # String format for frontend
+    hire_date: Optional[date] = None
     salary: Optional[float] = None
     
     # Related data (optional)

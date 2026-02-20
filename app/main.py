@@ -1,12 +1,11 @@
 """
 FastAPI Main Application
 """
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1 import api_router
 from app.database import engine, Base
-import time
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -16,14 +15,6 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
-
-
-# Logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log every incoming request and response"""
-    response = await call_next(request)
-    return response
 
 
 # Create database tables

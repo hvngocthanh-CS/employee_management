@@ -3,9 +3,10 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.core.deps import get_current_user, require_manager_or_admin
+from app.core.deps import get_current_user
+from app.core.permissions import PermissionDependencies
 from app.models.user import User, UserRole
-from app.models.leave import LeaveStatus
+from app.models.leave import LeaveStatus, Leave
 from app.schemas.leave import (
     LeaveCreate,
     LeaveUpdate,
@@ -37,38 +38,36 @@ def list_leaves(
     Admin/Manager: xem tất cả
     Employee: chỉ xem của mình
     """
-    # Get total count
-    filters = {}
-    if status:
-        filters['status'] = status
-    
     if current_user.role == UserRole.EMPLOYEE:
         # Employee chỉ xem leaves của mình
-        leaves = crud_leave.leave.get_by_employee(
+        leaves = crud_leave.get_by_employee(
             db,
             employee_id=current_user.employee_id,
             status=status,
             skip=skip,
             limit=limit
         )
-        total = crud_leave.leave.count(
-            db,
-            filters={'employee_id': current_user.employee_id, **filters}
-        )
+        # Count total for employee
+        count_query = db.query(Leave).filter(Leave.employee_id == current_user.employee_id)
+        if status:
+            count_query = count_query.filter(Leave.status == status)
+        total = count_query.count()
     else:
         # Admin/Manager xem tất cả
+        query = db.query(Leave)
         if status:
-            filters['status'] = status
+            query = query.filter(Leave.status == status)
         
-        leaves = crud_leave.leave.get_multi(
-            db, skip=skip, limit=limit, filters=filters
-        )
-        total = crud_leave.leave.count(db, filters=filters)
+        total = query.count()
+        leaves = query.order_by(Leave.created_at.desc())\
+            .offset(skip)\
+            .limit(limit)\
+            .all()
     
     # Convert to response format
     leave_responses = []
     for leave in leaves:
-        employee = crud_employee.employee.get(db, id=leave.employee_id)
+        employee = crud_employee.get(db, id=leave.employee_id)
         approver_name = None
         if leave.approved_by:
             from app.crud import user as crud_user
@@ -101,19 +100,19 @@ def get_pending_leaves(
     department_id: Optional[int] = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_read_leave)
 ):
     """
-    Get leaves đang chờ duyệt
-    Yêu cầu role MANAGER hoặc ADMIN
+    Get pending leave requests
+    Permissions: Admin, Manager
     """
-    leaves = crud_leave.leave.get_pending_leaves(
+    leaves = crud_leave.get_pending_leaves(
         db, department_id=department_id, skip=skip, limit=limit
     )
     
     result = []
     for leave in leaves:
-        employee = crud_employee.employee.get(db, id=leave.employee_id)
+        employee = crud_employee.get(db, id=leave.employee_id)
         result.append(
             LeaveResponse(
                 **leave.__dict__,
@@ -126,6 +125,67 @@ def get_pending_leaves(
     return result
 
 
+@router.get("/my-leaves", response_model=LeaveListResponse)
+def get_my_leaves(
+    *,
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1),
+    status: Optional[LeaveStatus] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get current user's leave requests.
+    
+    Permissions: All authenticated users with employee_id
+    
+    Query Parameters:
+      skip: Number of records to skip
+      limit: Maximum records to return
+      status: Filter by leave status
+      
+    Returns:
+      List of current user's leave requests
+    """
+    if not current_user.employee_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No employee record found for current user"
+        )
+    
+    # Get employee leaves
+    leaves = crud_leave.get_by_employee(
+        db,
+        employee_id=current_user.employee_id,
+        status=status,
+        skip=skip,
+        limit=limit
+    )
+    
+    # Get total count
+    count_query = db.query(Leave).filter(Leave.employee_id == current_user.employee_id)
+    if status:
+        count_query = count_query.filter(Leave.status == status)
+    total = count_query.count()
+    
+    # Add employee info to response
+    employee = crud_employee.get(db, id=current_user.employee_id)
+    result = []
+    for leave in leaves:
+        leave_dict = leave.__dict__.copy()
+        leave_dict['employee_name'] = employee.full_name if employee else None
+        leave_dict['employee_code'] = employee.employee_code if employee else None
+        leave_dict['department_name'] = employee.department.name if employee and employee.department else None
+        result.append(LeaveResponse(**leave_dict))
+    
+    return LeaveListResponse(
+        leaves=result, 
+        total=total,
+        page=skip // limit + 1,  # Calculate current page (1-based)
+        page_size=limit
+    )
+
+
 @router.get("/{leave_id}", response_model=LeaveResponse)
 def get_leave(
     *,
@@ -134,7 +194,7 @@ def get_leave(
     current_user: User = Depends(get_current_user)
 ):
     """Get leave by ID"""
-    leave = crud_leave.leave.get(db, id=leave_id)
+    leave = crud_leave.get(db, id=leave_id)
     if not leave:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -149,7 +209,7 @@ def get_leave(
                 detail="You can only view your own leave requests"
             )
     
-    employee = crud_employee.employee.get(db, id=leave.employee_id)
+    employee = crud_employee.get(db, id=leave.employee_id)
     
     approver_name = None
     if leave.approved_by:
@@ -179,11 +239,18 @@ def create_leave(
     Employee chỉ được tạo cho chính mình
     """
     # Check employee exists
-    employee = crud_employee.employee.get(db, id=leave_in.employee_id)
+    employee = crud_employee.get(db, id=leave_in.employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Employee not found"
+        )
+    
+    # Validate: start_date must be >= employee hire_date
+    if employee.hire_date and leave_in.start_date < employee.hire_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Ngày bắt đầu nghỉ phép ({leave_in.start_date}) phải >= ngày thuê nhân viên ({employee.hire_date})"
         )
     
     # Employee chỉ được tạo leave cho chính mình
@@ -195,7 +262,7 @@ def create_leave(
             )
     
     # Check for conflicts
-    has_conflict = crud_leave.leave.check_leave_conflict(
+    has_conflict = crud_leave.check_leave_conflict(
         db,
         employee_id=leave_in.employee_id,
         start_date=leave_in.start_date,
@@ -208,7 +275,7 @@ def create_leave(
             detail="Leave request conflicts with existing leave"
         )
     
-    leave = crud_leave.leave.create(db, obj_in=leave_in)
+    leave = crud_leave.create(db, obj_in=leave_in)
     
     return LeaveResponse(
         **leave.__dict__,
@@ -230,7 +297,7 @@ def update_leave(
     Update leave request (chỉ khi status = PENDING)
     Employee chỉ được update của mình
     """
-    leave = crud_leave.leave.get(db, id=leave_id)
+    leave = crud_leave.get(db, id=leave_id)
     if not leave:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -257,7 +324,7 @@ def update_leave(
         start = leave_in.start_date or leave.start_date
         end = leave_in.end_date or leave.end_date
         
-        has_conflict = crud_leave.leave.check_leave_conflict(
+        has_conflict = crud_leave.check_leave_conflict(
             db,
             employee_id=leave.employee_id,
             start_date=start,
@@ -271,9 +338,9 @@ def update_leave(
                 detail="Leave request conflicts with existing leave"
             )
     
-    leave = crud_leave.leave.update(db, db_obj=leave, obj_in=leave_in)
+    leave = crud_leave.update(db, db_obj=leave, obj_in=leave_in)
     
-    employee = crud_employee.employee.get(db, id=leave.employee_id)
+    employee = crud_employee.get(db, id=leave.employee_id)
     
     return LeaveResponse(
         **leave.__dict__,
@@ -288,18 +355,18 @@ def approve_leave(
     *,
     db: Session = Depends(get_db),
     leave_id: int,
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_approve_leave)
 ):
     """
-    Duyệt đơn nghỉ phép
-    Yêu cầu role MANAGER hoặc ADMIN
+    Approve leave request
+    Permissions: Admin, Manager
     """
     try:
-        leave = crud_leave.leave.approve_leave(
+        leave = crud_leave.approve_leave(
             db, leave_id=leave_id, approver_id=current_user.id
         )
         
-        employee = crud_employee.employee.get(db, id=leave.employee_id)
+        employee = crud_employee.get(db, id=leave.employee_id)
         
         return LeaveResponse(
             **leave.__dict__,
@@ -320,18 +387,18 @@ def reject_leave(
     *,
     db: Session = Depends(get_db),
     leave_id: int,
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_approve_leave)
 ):
     """
-    Từ chối đơn nghỉ phép
-    Yêu cầu role MANAGER hoặc ADMIN
+    Reject leave request
+    Permissions: Admin, Manager
     """
     try:
-        leave = crud_leave.leave.reject_leave(
+        leave = crud_leave.reject_leave(
             db, leave_id=leave_id, approver_id=current_user.id
         )
         
-        employee = crud_employee.employee.get(db, id=leave.employee_id)
+        employee = crud_employee.get(db, id=leave.employee_id)
         
         return LeaveResponse(
             **leave.__dict__,
@@ -356,11 +423,11 @@ def cancel_leave(
 ):
     """Hủy đơn nghỉ phép (employee tự hủy)"""
     try:
-        leave = crud_leave.leave.cancel_leave(
+        leave = crud_leave.cancel_leave(
             db, leave_id=leave_id, employee_id=current_user.employee_id
         )
         
-        employee = crud_employee.employee.get(db, id=leave.employee_id)
+        employee = crud_employee.get(db, id=leave.employee_id)
         
         return LeaveResponse(
             **leave.__dict__,
@@ -392,14 +459,14 @@ def get_leave_balance(
                 detail="You can only view your own leave balance"
             )
     
-    employee = crud_employee.employee.get(db, id=employee_id)
+    employee = crud_employee.get(db, id=employee_id)
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Employee not found"
         )
     
-    balance = crud_leave.leave.get_leave_balance(
+    balance = crud_leave.get_leave_balance(
         db, employee_id=employee_id, year=year
     )
     
@@ -418,13 +485,13 @@ def get_leave_statistics(
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
     department_id: Optional[int] = None,
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_read_leave)
 ):
     """
-    Thống kê nghỉ phép theo tháng
-    Yêu cầu role MANAGER hoặc ADMIN
+    Get monthly leave statistics
+    Permissions: Admin, Manager
     """
-    stats = crud_leave.leave.get_leave_statistics(
+    stats = crud_leave.get_leave_statistics(
         db, month=month, year=year, department_id=department_id
     )
     
@@ -440,14 +507,14 @@ def get_leave_calendar(
     current_user: User = Depends(get_current_user)
 ):
     """Lịch nghỉ phép trong một ngày"""
-    calendar = crud_leave.leave.get_leave_calendar(
+    calendar = crud_leave.get_leave_calendar(
         db, target_date=target_date, department_id=department_id
     )
     
     # Convert leaves to response format
     leave_responses = []
     for leave in calendar["leaves"]:
-        employee = crud_employee.employee.get(db, id=leave.employee_id)
+        employee = crud_employee.get(db, id=leave.employee_id)
         leave_responses.append(
             LeaveResponse(
                 **leave.__dict__,
@@ -469,19 +536,19 @@ def delete_leave(
     *,
     db: Session = Depends(get_db),
     leave_id: int,
-    current_user: User = Depends(require_manager_or_admin)
+    current_user: User = Depends(PermissionDependencies.can_delete_leave)
 ):
     """
     Delete leave request (hard delete)
-    Yêu cầu role MANAGER hoặc ADMIN
-    Thường nên dùng cancel thay vì delete
+    Permissions: Admin only
+    Note: Should use cancel instead of delete in most cases
     """
-    leave = crud_leave.leave.get(db, id=leave_id)
+    leave = crud_leave.get(db, id=leave_id)
     if not leave:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Leave not found"
         )
     
-    crud_leave.leave.delete(db, id=leave_id)
+    crud_leave.delete(db, id=leave_id)
     return None
