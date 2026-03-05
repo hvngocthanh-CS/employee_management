@@ -1,7 +1,7 @@
 """Remove salary column from employees table
 
-Revision ID: remove_employee_salary
-Revises: add_salary_data
+Revision ID: 003
+Revises: 002
 Create Date: 2026-02-21
 
 EXPLAINING THE CHANGE:
@@ -53,7 +53,7 @@ SQL TO GET CURRENT SALARY:
 =========================
 SELECT e.id, e.full_name, s.base_salary as current_salary
 FROM employees e
-LEFT JOIN salaries s ON s.employee_id = e.id 
+LEFT JOIN salaries s ON s.employee_id = e.id
   AND s.effective_to IS NULL
 ORDER BY e.id;
 
@@ -76,9 +76,10 @@ class Salary(Base):
 from alembic import op
 import sqlalchemy as sa
 
+
 # revision identifiers, used by Alembic.
-revision = 'remove_employee_salary'
-down_revision = 'add_salary_data'
+revision = '003'
+down_revision = '002'
 branch_labels = None
 depends_on = None
 
@@ -86,27 +87,32 @@ depends_on = None
 def upgrade():
     """
     Remove salary column from employees table.
-    Data is now ONLY in salaries table (proper design).
-    """
-    print("⚠️  Removing employees.salary column...")
-    print("ℹ️  Salary data now ONLY in salaries table (proper Foreign Key design)")
     
+    IMPORTANT: Run migration 002 (add_salary_data) first to ensure
+    all employees have salary records in the salaries table before
+    removing the salary column from employees table.
+    """
     # Drop the salary column
+    # Note: In production, you might want to:
+    # 1. First copy data from employees.salary to salaries table
+    # 2. Then drop the column
+    # But we already did step 1 in migration 002
     op.drop_column('employees', 'salary')
     
-    print("✅ employees.salary column removed")
-    print("ℹ️  Use LEFT JOIN with salaries table to get current salary")
+    print("✓ Removed salary column from employees table")
+    print("  All salary data now in 'salaries' table only")
 
 
 def downgrade():
     """
-    Add salary column back (only if you need to rollback).
-    Note: This is for reversibility only. The correct design is WITHOUT this column.
+    Restore salary column to employees table.
+    
+    WARNING: This will re-add the column but it will be NULL for all employees.
+    You would need another data migration to populate it from salaries table.
     """
-    op.add_column('employees', 
-        sa.Column('salary', sa.DECIMAL(10, 2), nullable=True)
+    op.add_column('employees',
+        sa.Column('salary', sa.DECIMAL(precision=10, scale=2), nullable=True)
     )
     
-    # Optionally copy current salary from salaries table back to employees
-    # (this is just for rollback, not recommended in production)
-    print("⚠️  Rollback: Added salary column back (not recommended)")
+    print("✓ Restored salary column to employees table")
+    print("  WARNING: Column values are NULL, need data migration to populate")

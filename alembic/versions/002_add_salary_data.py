@@ -1,7 +1,7 @@
-"""add sample salary data
+"""Add sample salary data
 
-Revision ID: add_salary_data
-Revises: d9276dc5649e
+Revision ID: 002
+Revises: 001
 Create Date: 2026-02-21
 
 This migration adds sample salary data for employees.
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from datetime import date
 
 # revision identifiers, used by Alembic.
-revision = 'add_salary_data'
-down_revision = 'd9276dc5649e'
+revision = '002'
+down_revision = '001'
 branch_labels = None
 depends_on = None
 
