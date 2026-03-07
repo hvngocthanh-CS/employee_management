@@ -2,9 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
 from app.database import get_db
-from app.schemas.user import UserCreate, UserLogin, Token, UserProfile, ChangePasswordRequest, ResetPasswordRequest
+from app.schemas.user import (
+    UserCreate, UserLogin, Token, UserProfile,
+    ChangePasswordRequest, ResetPasswordRequest, RefreshTokenRequest
+)
 from app.models.user import User, UserRole
-from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.security import (
+    verify_password, get_password_hash, create_access_token,
+    create_refresh_token, hash_refresh_token, refresh_token_expires_at
+)
 from app.core.config import settings
 from app.core.deps import get_current_user
 from app.core.permissions import get_user_permissions, get_menu_permissions, PermissionDependencies
@@ -64,20 +70,32 @@ def login(user_in: UserLogin, db: Session = Depends(get_db)):
             detail="Inactive user"
         )
     
-    # Create access token
+    # --- Issue access token (JWT, short-lived) ---
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.username, "user_id": user.id},
         expires_delta=access_token_expires
     )
-    
+
+    # --- Issue refresh token (opaque random, long-lived) ---
+    raw_refresh_token = create_refresh_token()
+    user.refresh_token_hash = hash_refresh_token(raw_refresh_token)
+    user.refresh_token_expires_at = refresh_token_expires_at()
+
+    # Update last_login timestamp
+    from datetime import datetime, timezone
+    user.last_login = datetime.now(timezone.utc)
+    db.commit()
+
     # Get user permissions and menu visibility
     permissions = get_user_permissions(user)
     menu_permissions = get_menu_permissions(user)
-    
+
     return {
         "access_token": access_token,
+        "refresh_token": raw_refresh_token,
         "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         "user": {
             "id": user.id,
             "username": user.username,
@@ -236,3 +254,97 @@ def reset_password(
         "user_id": target_user.id,
         "username": target_user.username
     }
+
+
+@router.post("/refresh", response_model=Token)
+def refresh_tokens(body: RefreshTokenRequest, db: Session = Depends(get_db)):
+    """
+    Refresh Access Token bằng Refresh Token.
+
+    Flow (Token Rotation):
+      1. Client gửi refresh_token cũ.
+      2. Server hash nó, tìm user có hash khớp và kiểm tra chưa hết hạn.
+      3. Nếu hợp lệ: cấp một cặp token MỚI, ghi đè hash cũ trong DB (invalidate cái cũ).
+      4. Nếu không hợp lệ: trả 401 — có thể token bị đánh cắp.
+
+    Tại sao dùng Token Rotation?
+      - Nếu kẻ tấn công lấy được refresh token và dùng trước legitimate user:
+        legitimate user gửi token cũ → server phát hiện bất thường → có thể thu hồi toàn bộ session.
+    """
+    from datetime import datetime, timezone
+
+    incoming_hash = hash_refresh_token(body.refresh_token)
+
+    # Find user by refresh token hash
+    user = db.query(User).filter(User.refresh_token_hash == incoming_hash).first()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+
+    # Check expiration
+    if user.refresh_token_expires_at is None or \
+            user.refresh_token_expires_at < datetime.now(timezone.utc):
+        # Token expired — clear it and force re-login
+        user.refresh_token_hash = None
+        user.refresh_token_expires_at = None
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token expired, please login again",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user",
+        )
+
+    # --- Token Rotation: issue NEW pair, invalidate old refresh token ---
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    new_access_token = create_access_token(
+        data={"sub": user.username, "user_id": user.id},
+        expires_delta=access_token_expires
+    )
+    new_raw_refresh = create_refresh_token()
+    user.refresh_token_hash = hash_refresh_token(new_raw_refresh)
+    user.refresh_token_expires_at = refresh_token_expires_at()
+    db.commit()
+
+    permissions = get_user_permissions(user)
+    menu_permissions = get_menu_permissions(user)
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_raw_refresh,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role.value,
+            "employee_id": user.employee_id,
+            "is_active": user.is_active,
+            "permissions": permissions,
+            "menu_permissions": menu_permissions
+        }
+    }
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Logout: vô hiệu hóa refresh token hiện tại của user.
+
+    - Access token vẫn còn hiệu lực cho đến khi hết hạn (30 phút) — đây là đặc điểm của JWT stateless.
+    - Refresh token bị xóa trong DB ngay lập tức → không thể lấy access token mới nữa.
+    - Best practice: frontend cũng phải xóa access token khỏi bộ nhớ sau khi gọi API này.
+    """
+    current_user.refresh_token_hash = None
+    current_user.refresh_token_expires_at = None
+    db.commit()

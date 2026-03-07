@@ -32,6 +32,11 @@ class User(Base):
     # Status
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     last_login = Column(DateTime(timezone=True), nullable=True)
+
+    # Refresh token (hashed SHA-256 stored, raw value sent to client)
+    # nullable=True  → user has no active refresh session after logout
+    refresh_token_hash = Column(String(64), nullable=True, index=True)
+    refresh_token_expires_at = Column(DateTime(timezone=True), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

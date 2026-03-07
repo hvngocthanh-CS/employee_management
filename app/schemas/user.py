@@ -163,10 +163,16 @@ class UserInToken(BaseModel):
 
 class Token(BaseModel):
     """Schema cho JWT token response với user info"""
-    access_token: str = Field(..., description="JWT access token")
+    access_token: str = Field(..., description="JWT access token (short-lived, 30 min)")
+    refresh_token: str = Field(..., description="Opaque refresh token (long-lived, 7 days)")
     token_type: str = Field(default="bearer", description="Token type")
-    expires_in: Optional[int] = Field(None, description="Token expiration time in seconds")
+    expires_in: Optional[int] = Field(None, description="Access token expiration time in seconds")
     user: Optional[UserInToken] = None  # Include user info in login response
+
+
+class RefreshTokenRequest(BaseModel):
+    """Schema cho yêu cầu làm mới access token"""
+    refresh_token: str = Field(..., description="Refresh token nhận được lúc login")
 
 
 class TokenData(BaseModel):
